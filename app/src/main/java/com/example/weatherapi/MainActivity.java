@@ -4,6 +4,7 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import android.Manifest;
 import android.location.Location;
@@ -50,6 +51,7 @@ public class MainActivity extends AppCompatActivity {
     private UVRecyclerViewAdapter uvRecyclerViewAdapter;
     private LinearLayoutManager linearLayoutManager;
     private ProgressBar progressBar;
+    private SwipeRefreshLayout swipeRefreshLayout;
 
     private RequestQueue requestQueue;
 
@@ -60,8 +62,10 @@ public class MainActivity extends AppCompatActivity {
 
         recyclerView = findViewById(R.id.recyclerView);
         progressBar = findViewById(R.id.progressBar);
+        swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout);
 
         progressBar.setVisibility(View.VISIBLE);
+        requestQueue = Volley.newRequestQueue(this);
 
         Dexter.withActivity(this)
                 .withPermission(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -90,18 +94,12 @@ public class MainActivity extends AppCompatActivity {
                 super.onScrolled(recyclerView, dx, dy);
 
                 if (linearLayoutManager.findLastVisibleItemPosition() == data.size() - 1) {
-                    progressBar.setVisibility(View.VISIBLE);
-
                     Date startDate = getStartDate(nextCallEndDate);
                     sendRequestFrom(startDate, nextCallEndDate);
                     updateNextCallEndDate(startDate);
-
-//                    uvRecyclerViewAdapter.notifyDataSetChanged();
                 }
             }
         });
-
-        requestQueue = Volley.newRequestQueue(this);
     }
 
     private void getLocation() {
@@ -124,6 +122,22 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void gotLocation() {
+        swipeRefreshLayout.setOnRefreshListener(new SwipeRefreshLayout.OnRefreshListener() {
+            @Override
+            public void onRefresh() {
+                nextCallEndDate = new Date();
+
+                data.clear();
+
+                Date endDate = new Date();  // 14th
+                Date startDate = getStartDate(endDate);  // 9th
+
+                sendRequestFrom(startDate, endDate);
+
+                updateNextCallEndDate(startDate);
+            }
+        });
+
         Date endDate = new Date();  // 14th
         Date startDate = getStartDate(endDate);  // 9th
 
@@ -150,6 +164,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void sendRequestFrom(Date startDate, Date endDate) {
+        progressBar.setVisibility(View.VISIBLE);
+
         String URL = "https://api.openweathermap.org/data/2.5/uvi/history?appid=d1f77cf0e8fa40b4f42c1e9dc0685eb2" +
                 "&lat=" + latitude +
                 "&lon=" + longitude +
@@ -165,6 +181,7 @@ public class MainActivity extends AppCompatActivity {
                 Gson gson = builder.create();
 
                 progressBar.setVisibility(View.GONE);
+                swipeRefreshLayout.setRefreshing(false);
 
                 List<UVValue> pageData = Arrays.asList(gson.fromJson(response, UVValue[].class));
                 gotData(pageData);
