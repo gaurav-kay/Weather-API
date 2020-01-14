@@ -1,14 +1,15 @@
 package com.example.weatherapi;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import android.Manifest;
 import android.location.Location;
-import android.media.tv.TvContract;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.View;
 import android.widget.ProgressBar;
 
 import com.android.volley.RequestQueue;
@@ -31,7 +32,9 @@ import com.karumi.dexter.listener.single.PermissionListener;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.Date;
+import java.util.List;
 
 
 public class MainActivity extends AppCompatActivity {
@@ -39,17 +42,26 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "TAG";
 
     private double latitude, longitude;
-    private Date dataTillDate;
+    private Date nextCallEndDate;
 
     private ArrayList<UVValue> data = new ArrayList<>();
 
     private RecyclerView recyclerView;
+    private UVRecyclerViewAdapter uvRecyclerViewAdapter;
+    private LinearLayoutManager linearLayoutManager;
     private ProgressBar progressBar;
+
+    private RequestQueue requestQueue;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        recyclerView = findViewById(R.id.recyclerView);
+        progressBar = findViewById(R.id.progressBar);
+
+        progressBar.setVisibility(View.VISIBLE);
 
         Dexter.withActivity(this)
                 .withPermission(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -69,17 +81,31 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }).check();
 
-        recyclerView = findViewById(R.id.recyclerView);
-        progressBar = findViewById(R.id.progressBar);
-
-        LinearLayoutManager linearLayoutManager = new LinearLayoutManager(this);
+        linearLayoutManager = new LinearLayoutManager(this);
         recyclerView.setLayoutManager(linearLayoutManager);
+
+        recyclerView.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
+                super.onScrolled(recyclerView, dx, dy);
+
+                if (linearLayoutManager.findLastVisibleItemPosition() == data.size() - 1) {
+                    progressBar.setVisibility(View.VISIBLE);
+
+                    Date startDate = getStartDate(nextCallEndDate);
+                    sendRequestFrom(startDate, nextCallEndDate);
+                    updateNextCallEndDate(startDate);
+
+//                    uvRecyclerViewAdapter.notifyDataSetChanged();
+                }
+            }
+        });
+
+        requestQueue = Volley.newRequestQueue(this);
     }
 
     private void getLocation() {
         FusedLocationProviderClient fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
-
-        Log.d(TAG, "onCreate: OK JIJI");
 
         fusedLocationClient.getLastLocation()
                 .addOnSuccessListener(MainActivity.this, new OnSuccessListener<Location>() {
@@ -98,28 +124,37 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void gotLocation() {
-        Date endDate = new Date();
+        Date endDate = new Date();  // 14th
+        Date startDate = getStartDate(endDate);  // 9th
 
-        sendRequestFrom(endDate);
+        sendRequestFrom(startDate, endDate);
+
+        updateNextCallEndDate(startDate);
+
+        uvRecyclerViewAdapter = new UVRecyclerViewAdapter(data, this);
+        recyclerView.setAdapter(uvRecyclerViewAdapter);
     }
 
-    private void sendRequestFrom(final Date endDate) {
+    private void updateNextCallEndDate(Date startDate) {
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTime(startDate);
+        calendar.add(Calendar.DATE, -1);
+        nextCallEndDate = calendar.getTime();
+    }
+
+    private Date getStartDate(Date endDate) {
         Calendar calendar = Calendar.getInstance();
         calendar.setTime(endDate);
         calendar.add(Calendar.DATE, -5);
-        Date startDate = calendar.getTime();
+        return calendar.getTime();
+    }
 
-        dataTillDate = startDate;
-
+    private void sendRequestFrom(Date startDate, Date endDate) {
         String URL = "https://api.openweathermap.org/data/2.5/uvi/history?appid=d1f77cf0e8fa40b4f42c1e9dc0685eb2" +
                 "&lat=" + latitude +
                 "&lon=" + longitude +
                 "&start=" + (startDate.getTime() / 1000L) +
                 "&end=" + (endDate.getTime() / 1000L);
-
-        Log.d(TAG, "sendRequestFrom: " + (startDate.getTime() / 1000L) + "end" + (endDate.getTime() / 1000L));
-
-        // TODO: Sort out data retrieval
 
         StringRequest request = new StringRequest(StringRequest.Method.GET, URL, new Response.Listener<String>() {
             @Override
@@ -129,12 +164,9 @@ public class MainActivity extends AppCompatActivity {
                 GsonBuilder builder = new GsonBuilder();
                 Gson gson = builder.create();
 
-                UVValue[] pageData = gson.fromJson(response, UVValue[].class);
+                progressBar.setVisibility(View.GONE);
 
-                for(UVValue d : pageData) {
-                    Log.d(TAG, "for " + endDate + " w value " + d.getDate() + " : = " + String.valueOf(d.getDateIso()));
-                }
-
+                List<UVValue> pageData = Arrays.asList(gson.fromJson(response, UVValue[].class));
                 gotData(pageData);
             }
         }, new Response.ErrorListener() {
@@ -144,15 +176,16 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        RequestQueue requestQueue = Volley.newRequestQueue(this);
         requestQueue.add(request);
     }
 
-    private void gotData(UVValue[] pageData) {
-        data.addAll(Arrays.asList(pageData));
+    private void gotData(List<UVValue> pageData) {
+        Collections.reverse(pageData);
+        data.addAll(pageData);
 
         Log.d(TAG, "gotData: " + data.size() + data);
 
-        recyclerView.setAdapter(new UVRecyclerViewAdapter(data, this));
+        uvRecyclerViewAdapter.notifyDataSetChanged();
+        // uvRecyclerViewAdapter.notifyItemRangeInserted(data.size() - pageData.size(), pageData.size());
     }
 }
